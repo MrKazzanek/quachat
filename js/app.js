@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('nameInput').value = dbProfile.name || '';
     if (dbProfile.avatar) {
       document.getElementById('profileAvatarDisplay').innerHTML = `<img src="${dbProfile.avatar}">`;
+      document.getElementById('profileAvatarDisplay').dataset.avatar = dbProfile.avatar;
     }
   } else {
     const legacyName = localStorage.getItem('qoza_name') || '';
@@ -56,12 +57,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   WebRTCEngine.callbacks.onKnockRequest = (name, avatar, callback) => {
-    const accept = confirm(`Użytkownik "${name}" chce dołączyć do pokoju. Zezwolić?`);
-    callback(accept);
+    document.getElementById('knockUserLabel').textContent = `${name} chce dołączyć do pokoju.`;
+    document.getElementById('knockModal').classList.add('open');
+
+    document.getElementById('knockAcceptBtn').onclick = () => {
+      document.getElementById('knockModal').classList.remove('open');
+      callback(true);
+    };
+
+    document.getElementById('knockRejectBtn').onclick = () => {
+      document.getElementById('knockModal').classList.remove('open');
+      callback(false);
+    };
   };
 
   WebRTCEngine.callbacks.onKicked = (reason) => {
     alert(reason);
+    UIManager.closeChatBack();
+  };
+
+  WebRTCEngine.callbacks.onRoomDeleted = () => {
+    alert('Właściciel usunął pokój.');
     UIManager.closeChatBack();
   };
 
@@ -149,7 +165,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Join room
+  // Join room helper
+  async function attemptJoin(rawCode, password = '') {
+    const name = document.getElementById('nameInput').value.trim();
+    const profile = await QozaChatDB.getProfile();
+    const avatar = profile ? profile.avatar : name[0].toUpperCase();
+
+    await WebRTCEngine.joinRoom(rawCode, name, avatar, password);
+    await QozaChatDB.saveProfile({ name, avatar });
+    await QozaChatDB.saveRoom(rawCode, 'Pokój ' + rawCode.slice(0, 4), false);
+
+    UIManager.openChatScreen();
+    UIManager.hideWaiting();
+    UIManager.enableInput(true);
+    UIManager.setBadge('ok');
+
+    // Load previous local messages from IndexedDB for this room
+    const pastMsgs = await QozaChatDB.getRoomMessages(rawCode);
+    if (pastMsgs.length > 0) {
+      pastMsgs.forEach(m => MessageManager.renderMessage(document.getElementById('msgs'), m, true));
+      UIManager.scrollBottom();
+    }
+  }
+
+  // Join button click
   document.getElementById('joinBtn').addEventListener('click', async () => {
     const name = document.getElementById('nameInput').value.trim();
     const raw = normalizeCode(document.getElementById('roomInput').value);
@@ -160,50 +199,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     UIManager.setLobbyStatus('Łączenie z pokojem…', 'info');
 
     try {
-      const profile = await QozaChatDB.getProfile();
-      const avatar = profile ? profile.avatar : name[0].toUpperCase();
-
-      // Check if password might be required
-      const pass = document.getElementById('passwordJoinInput') ? document.getElementById('passwordJoinInput').value : '';
-
-      await WebRTCEngine.joinRoom(raw, name, avatar, pass);
-
-      await QozaChatDB.saveProfile({ name, avatar });
-      await QozaChatDB.saveRoom(raw, 'Pokój ' + raw.slice(0, 4), false);
-
-      UIManager.openChatScreen();
-      UIManager.hideWaiting();
-      UIManager.enableInput(true);
-      UIManager.setBadge('ok');
-
-      // Load previous local messages from IndexedDB for this room
-      const pastMsgs = await QozaChatDB.getRoomMessages(raw);
-      if (pastMsgs.length > 0) {
-        pastMsgs.forEach(m => MessageManager.renderMessage(document.getElementById('msgs'), m, true));
-        UIManager.scrollBottom();
-      }
+      await attemptJoin(raw, '');
     } catch (err) {
-      if (err.message.includes('hasło')) {
-        const passPrompt = prompt('Ten pokój wymaga hasła. Wpisz hasło:');
-        if (passPrompt !== null) {
+      if (err.message.includes('password-required') || err.message.includes('hasło')) {
+        UIManager.clearLobbyStatus();
+        document.getElementById('passwordModalInput').value = '';
+        document.getElementById('passwordModal').classList.add('open');
+        document.getElementById('passwordModalInput').focus();
+
+        document.getElementById('passwordConfirmBtn').onclick = async () => {
+          const pass = document.getElementById('passwordModalInput').value;
+          document.getElementById('passwordModal').classList.remove('open');
+          UIManager.setLobbyStatus('Weryfikacja hasła…', 'info');
           try {
-            const profile = await QozaChatDB.getProfile();
-            const avatar = profile ? profile.avatar : name[0].toUpperCase();
-            await WebRTCEngine.joinRoom(raw, name, avatar, passPrompt);
-            UIManager.openChatScreen();
-            UIManager.hideWaiting();
-            UIManager.enableInput(true);
-            UIManager.setBadge('ok');
-            return;
+            await attemptJoin(raw, pass);
           } catch (e2) {
             UIManager.setLobbyStatus(e2.message, 'error');
-            return;
           }
-        }
+        };
+      } else {
+        UIManager.setLobbyStatus(err.message, 'error');
       }
-      UIManager.setLobbyStatus(err.message, 'error');
     }
   });
+
+  document.getElementById('passwordModalClose').onclick = () => document.getElementById('passwordModal').classList.remove('open');
+  document.getElementById('passwordCancelBtn').onclick = () => document.getElementById('passwordModal').classList.remove('open');
 
   document.getElementById('roomInput').addEventListener('input', function () {
     this.value = formatCode(this.value);
@@ -213,6 +234,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('profileCardSetup').onclick = async () => {
     const profile = (await QozaChatDB.getProfile()) || {};
     document.getElementById('profileNameInput').value = profile.name || document.getElementById('nameInput').value;
+    if (profile.avatar && profile.avatar.startsWith('data:')) {
+      document.getElementById('profileModalAvatarPrev').innerHTML = `<img src="${profile.avatar}">`;
+    }
     document.getElementById('profileModal').classList.add('open');
   };
   document.getElementById('profileModalClose').onclick = () => document.getElementById('profileModal').classList.remove('open');
@@ -246,10 +270,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // CHAT INPUT & MESSAGING
   // ═══════════════════════════════════════
 
-  function sendChatMessage() {
+  function handleSendOrEdit() {
     const inp = document.getElementById('chatInput');
     const text = inp.value.trim();
     if (!text) return;
+
+    if (UIManager.editingMsgId) {
+      // Perform Inline Editing
+      const editingId = UIManager.editingMsgId;
+      WebRTCEngine.sendEdit(editingId, text);
+      MessageManager.applyEdit(editingId, text);
+      UIManager.cancelEdit();
+      return;
+    }
 
     try {
       const msgObj = WebRTCEngine.sendMessage(text, MessageManager.activeReplyTo);
@@ -266,12 +299,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  document.getElementById('sendBtn').onclick = sendChatMessage;
+  document.getElementById('sendBtn').onclick = handleSendOrEdit;
 
   document.getElementById('chatInput').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendChatMessage();
+      handleSendOrEdit();
     }
   });
 
@@ -354,9 +387,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     this.value = '';
   };
 
-  // Video/Voice Call button
-  document.getElementById('callBtn').onclick = () => CallManager.toggleCall();
-
   // Room Settings button
   document.getElementById('roomSettingsBtn').onclick = () => UIManager.openRoomSettingsModal();
   document.getElementById('roomSettingsClose').onclick = () => document.getElementById('roomSettingsModal').classList.remove('open');
@@ -383,12 +413,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
 
+  // Delete Room button (for Owner)
+  const delRoomBtn = document.getElementById('deleteRoomBtn');
+  if (delRoomBtn) {
+    delRoomBtn.onclick = () => {
+      if (confirm('Czy na pewno chcesz usunąć ten pokój? Wszyscy uczestnicy zostaną rozłączeni.')) {
+        try {
+          WebRTCEngine.deleteRoom();
+          UIManager.closeChatBack();
+          UIManager.showToast('Pokój został usunięty');
+        } catch (err) {
+          alert(err.message);
+        }
+      }
+    };
+  }
+
   // Copy room code
   const copyCodeAction = () => {
     navigator.clipboard.writeText(WebRTCEngine.roomCode).then(() => UIManager.showToast('Skopiowano kod pokoju'));
   };
   document.getElementById('copyCodeBtn').onclick = copyCodeAction;
-  document.getElementById('mobileCopyBtn').onclick = copyCodeAction;
 
   // Leave chat
   const leaveAction = () => {
@@ -397,7 +442,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
   document.getElementById('leaveBtn').onclick = leaveAction;
-  document.getElementById('mobileLeaveBtn').onclick = leaveAction;
 
   // Export chat
   document.getElementById('exportBtn').onclick = () => {
@@ -414,7 +458,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     UIManager.showToast('Wyeksportowano historię czatu');
   };
 
-  // Emoji picker
+  // Emoji picker for input bar
   const pickerEl = document.getElementById('emojiPicker');
   EMOJIS.forEach(em => {
     const btn = document.createElement('button');
