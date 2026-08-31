@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>QozaChat – Szyfrowany Czat P2P</title>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
         <div class="feat"><div class="feat-dot"></div>Szyfrowane połączenie bezpośrednie (WebRTC)</div>
         <div class="feat"><div class="feat-dot"></div>Wiadomości głosowe, pliki, edycja i reakcje</div>
         <div class="feat"><div class="feat-dot"></div>System moderatorów, haseł i akceptacji</div>
-        <div class="feat"><div class="feat-dot"></div>Grupowe połączenia głosowe i wideo</div>
+        <div class="feat"><div class="feat-dot"></div>Lokalne trwale zapisane pokoje (IndexedDB)</div>
       </div>
     </div>
 
@@ -96,6 +96,9 @@
     </div>
 
     <div class="sb-foot">
+      <button class="btn btn-danger" id="deleteRoomBtn" style="display:none;width:100%;margin-bottom:6px">
+        🗑️ Usuń pokój
+      </button>
       <button class="leave-btn" id="leaveBtn">
         <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         Opuść pokój
@@ -112,37 +115,22 @@
         </button>
         <div class="chat-room-label" id="chatRoomLabel"># -----</div>
         <div class="status-badge badge-wait" id="statusBadge">
-          <div class="dot connecting"></div> Oczekuje
+          <div class="dot connecting"></div> Online
         </div>
       </div>
 
       <div class="topbar-actions">
-        <button class="icon-btn" id="callBtn" title="Połączenie głosowe/wideo">
-          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
-        </button>
-
         <button class="icon-btn" id="roomSettingsBtn" title="Ustawienia pokoju">
           <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
 
-        <select id="themeSelect" class="icon-btn" style="width:auto;padding:0 6px;font-size:11px" title="Motyw">
+        <select id="themeSelect" class="icon-btn" style="width:auto;padding:0 4px;font-size:11px" title="Motyw">
           <option value="default">Ciemny</option>
           <option value="midnight">Midnight</option>
           <option value="cyberpunk">Cyberpunk</option>
         </select>
-
-        <button class="icon-btn" id="mobileCopyBtn" title="Kopiuj kod">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        </button>
-
-        <button class="icon-btn" id="mobileLeaveBtn" title="Opuść" style="color:var(--red)">
-          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
       </div>
     </div>
-
-    <!-- Video Grid Overlay -->
-    <div class="video-grid" id="videoGrid"></div>
 
     <!-- Waiting Pane -->
     <div class="waiting-pane" id="waitingPane">
@@ -154,23 +142,28 @@
       <div class="waiting-hint">Prześlij ten 12-znakowy kod osobom, z którymi chcesz rozmawiać. Pokój mieści do 12 osób.</div>
     </div>
 
-    <!-- Typing Indicator Bar -->
-    <div class="typing-bar" id="typingBar">
-      <div class="typing-dots"><div class="td"></div><div class="td"></div><div class="td"></div></div>
-      <span id="typingLabel">Ktoś pisze...</span>
-    </div>
-
     <!-- Messages Container -->
     <div class="msgs" id="msgs" style="display:none"></div>
 
     <!-- Mentions Dropdown -->
     <div class="mentions-dropdown" id="mentionsDropdown"></div>
 
+    <!-- Typing Indicator Bar (Right Above Input Zone) -->
+    <div class="typing-bar" id="typingBar">
+      <div class="typing-dots"><div class="td"></div><div class="td"></div><div class="td"></div></div>
+      <span id="typingLabel">Ktoś pisze...</span>
+    </div>
+
     <!-- Input Zone -->
-    <div class="input-zone">
+    <div class="input-zone" id="inputZone">
       <div class="reply-banner hidden" id="replyBanner">
         <span class="reply-text" id="replyText"></span>
         <button class="reply-close" id="replyClose">✕</button>
+      </div>
+
+      <div class="reply-banner hidden" id="editBanner" style="border-left-color: var(--yellow);">
+        <span class="reply-text" id="editText" style="color: var(--yellow);"></span>
+        <button class="reply-close" id="editClose">✕</button>
       </div>
 
       <div class="input-bar">
@@ -191,7 +184,7 @@
       </div>
 
       <div class="input-hint">
-        <span>Enter — wyślij &nbsp;•&nbsp; Shift+Enter — nowa linia &nbsp;•&nbsp; @ — wzmianka &nbsp;•&nbsp; Przeciągnij plik</span>
+        <span>Enter — wyślij &nbsp;•&nbsp; Shift+Enter — nowa linia &nbsp;•&nbsp; @ — wzmianka</span>
         <button class="mobile-newline-btn" id="mobileNewlineBtn">↵ Nowa linia</button>
       </div>
     </div>
@@ -230,6 +223,32 @@
       <input class="field" id="profileNameInput" type="text" maxlength="20">
     </div>
     <button class="btn btn-acc" id="saveProfileBtn" style="width:100%">Zapisz profil</button>
+  </div>
+</div>
+
+<!-- Custom Password Entry Modal -->
+<div class="modal-backdrop" id="passwordModal">
+  <div class="modal">
+    <button class="modal-close" id="passwordModalClose">×</button>
+    <div class="modal-title">Wymagane hasło</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Ten pokój jest zabezpieczony hasłem. Wpisz hasło, aby dołączyć:</div>
+    <input class="field" id="passwordModalInput" type="password" placeholder="Hasło pokoju" style="margin-bottom:16px">
+    <div class="row-gap">
+      <button class="btn btn-ghost" id="passwordCancelBtn">Anuluj</button>
+      <button class="btn btn-acc" id="passwordConfirmBtn">Dołącz</button>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Knock Approval Modal -->
+<div class="modal-backdrop" id="knockModal">
+  <div class="modal">
+    <div class="modal-title">Prośba o dołączenie</div>
+    <div style="font-size:14px;color:var(--text);margin-bottom:16px" id="knockUserLabel">Ktoś chce dołączyć do pokoju.</div>
+    <div class="row-gap">
+      <button class="btn btn-danger" id="knockRejectBtn">Odrzuć</button>
+      <button class="btn btn-acc" id="knockAcceptBtn">Zaakceptuj</button>
+    </div>
   </div>
 </div>
 
@@ -278,7 +297,10 @@
   <img id="lightboxImg" src="" alt="Podgląd">
 </div>
 
-<!-- Emoji Picker Popup -->
+<!-- Floating Reaction Picker Popover -->
+<div class="emoji-picker" id="reactionPickerModal" style="display:none"></div>
+
+<!-- Emoji Picker Popup for Input -->
 <div class="emoji-picker" id="emojiPicker" style="display:none"></div>
 
 <!-- Toast Alert -->
@@ -291,7 +313,6 @@
 <script src="js/webrtc.js"></script>
 <script src="js/messages.js"></script>
 <script src="js/audio.js"></script>
-<script src="js/calls.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/app.js"></script>
 </body>
