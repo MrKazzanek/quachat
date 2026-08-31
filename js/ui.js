@@ -1,11 +1,14 @@
 const UIManager = {
   typingUsers: {},
   audioCtx: null,
+  reactionPickerFor: null,
+  editingMsgId: null,
 
   initUI() {
     this.setupEventListeners();
     this.setupTheme();
     this.setupMentionsDropdown();
+    this.setupReactionPicker();
   },
 
   playNotificationSound() {
@@ -16,8 +19,8 @@ const UIManager = {
       const osc = this.audioCtx.createOscillator();
       const gain = this.audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, this.audioCtx.currentTime); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, this.audioCtx.currentTime + 0.12); // A5
+      osc.frequency.setValueAtTime(587.33, this.audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, this.audioCtx.currentTime + 0.12);
 
       gain.gain.setValueAtTime(0.15, this.audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.25);
@@ -51,6 +54,8 @@ const UIManager = {
   setupTheme() {
     const savedTheme = localStorage.getItem('qoza_theme') || 'default';
     document.body.className = savedTheme !== 'default' ? 'theme-' + savedTheme : '';
+    const sel = document.getElementById('themeSelect');
+    if (sel) sel.value = savedTheme;
   },
 
   changeTheme(themeName) {
@@ -76,6 +81,8 @@ const UIManager = {
     document.getElementById('waitingPane').classList.remove('hidden');
     this.enableInput(false);
     MessageManager.msgMap = {};
+    this.clearReply();
+    this.cancelEdit();
     this.clearLobbyStatus();
     this.renderSavedRooms();
   },
@@ -140,7 +147,7 @@ const UIManager = {
       if (!isMe && RoomPermissions.isAdminOrOwner(WebRTCEngine.myRole)) {
         modActions = `
           <div class="user-mod-actions">
-            ${RoomPermissions.isOwner(WebRTCEngine.myRole) ? `<button class="bact" onclick="UIManager.toggleAdminRole('${escH(m.name)}')" title="Promuj/Zdegraduj">👑</button>` : ''}
+            ${RoomPermissions.isOwner(WebRTCEngine.myRole) ? `<button class="bact" onclick="UIManager.transferOwnershipPrompt('${escH(m.name)}')" title="Przekaż koronę właściciela">👑</button>` : ''}
             <button class="bact" onclick="UIManager.toggleMute('${escH(m.name)}')" title="Wycisz/Odwycisz">🔇</button>
             <button class="bact del" onclick="UIManager.kickUserPrompt('${escH(m.name)}')" title="Wyrzuć">🚪</button>
           </div>`;
@@ -158,6 +165,12 @@ const UIManager = {
         ${modActions}`;
       list.appendChild(d);
     });
+
+    // Show delete room button in sidebar if owner
+    const delRoomBtn = document.getElementById('deleteRoomBtn');
+    if (delRoomBtn) {
+      delRoomBtn.style.display = RoomPermissions.isOwner(WebRTCEngine.myRole) ? 'flex' : 'none';
+    }
   },
 
   updateTypingBar(name, isTyping, avatar) {
@@ -249,6 +262,7 @@ const UIManager = {
   },
 
   setReply(id, text, author) {
+    this.cancelEdit();
     MessageManager.activeReplyTo = { id, text, author };
     const banner = document.getElementById('replyBanner');
     banner.classList.remove('hidden');
@@ -262,13 +276,44 @@ const UIManager = {
   },
 
   startEditMessage(id, oldText) {
-    MessageManager.activeEditingId = id;
-    const newText = prompt('Edytuj wiadomość:', oldText);
-    if (newText !== null && newText.trim() !== '') {
-      WebRTCEngine.sendEdit(id, newText.trim());
-      MessageManager.applyEdit(id, newText.trim());
-    }
-    MessageManager.activeEditingId = null;
+    this.clearReply();
+    this.editingMsgId = id;
+    const inp = document.getElementById('chatInput');
+    inp.value = oldText;
+    inp.focus();
+
+    const banner = document.getElementById('editBanner');
+    banner.classList.remove('hidden');
+    document.getElementById('editText').textContent = 'Edytowanie wiadomości: ' + oldText.slice(0, 50);
+  },
+
+  cancelEdit() {
+    this.editingMsgId = null;
+    document.getElementById('editBanner').classList.add('hidden');
+    document.getElementById('chatInput').value = '';
+  },
+
+  setupReactionPicker() {
+    const picker = document.getElementById('reactionPickerModal');
+    if (!picker) return;
+
+    picker.innerHTML = '';
+    const quickEmojis = ['👍', '❤️', '😂', '😮', '😢', '🔥', '👏', '💯'];
+    quickEmojis.forEach(em => {
+      const btn = document.createElement('button');
+      btn.className = 'ep-em'; btn.textContent = em;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (this.reactionPickerFor) {
+          const item = MessageManager.msgMap[this.reactionPickerFor];
+          const hasReaction = item && item.data.reactions && item.data.reactions[em + '_' + WebRTCEngine.myName];
+          WebRTCEngine.sendReaction(this.reactionPickerFor, em, !hasReaction);
+          MessageManager.applyReaction(this.reactionPickerFor, em, !hasReaction, WebRTCEngine.myName);
+        }
+        this.closeReactionPicker();
+      };
+      picker.appendChild(btn);
+    });
   },
 
   openReactionPicker(e, id) {
@@ -276,8 +321,8 @@ const UIManager = {
     const picker = document.getElementById('reactionPickerModal');
     const rect = e.target.getBoundingClientRect();
     picker.style.display = 'flex';
-    picker.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
-    picker.style.top = Math.max(10, rect.top - 60) + 'px';
+    picker.style.left = Math.min(Math.max(10, rect.left - 40), window.innerWidth - 250) + 'px';
+    picker.style.top = Math.max(10, rect.top - 55) + 'px';
     picker.style.position = 'fixed';
     e.stopPropagation();
   },
@@ -285,6 +330,7 @@ const UIManager = {
   closeReactionPicker() {
     const picker = document.getElementById('reactionPickerModal');
     if (picker) picker.style.display = 'none';
+    this.reactionPickerFor = null;
   },
 
   openLightbox(src) {
@@ -306,15 +352,14 @@ const UIManager = {
     }
   },
 
-  toggleAdminRole(username) {
-    try {
-      const target = Object.values(WebRTCEngine.members).find(m => m.name === username);
-      if (!target) return;
-      const newRole = target.role === RoomPermissions.ROLES.ADMIN ? RoomPermissions.ROLES.MEMBER : RoomPermissions.ROLES.ADMIN;
-      WebRTCEngine.setRole(username, newRole);
-      this.showToast(`Zmieniono rolę ${username} na ${newRole}`);
-    } catch (err) {
-      this.showToast(err.message);
+  transferOwnershipPrompt(username) {
+    if (confirm(`Przekazać rolę Właściciela użytkownikowi ${username}?`)) {
+      try {
+        WebRTCEngine.transferOwnership(username);
+        this.showToast('Przekazano koronę dla ' + username);
+      } catch (err) {
+        this.showToast(err.message);
+      }
     }
   },
 
@@ -355,8 +400,9 @@ const UIManager = {
       document.getElementById('mobileOverlay').classList.remove('active');
     };
 
-    // Reply close
+    // Reply and Edit close
     document.getElementById('replyClose').onclick = () => this.clearReply();
+    document.getElementById('editClose').onclick = () => this.cancelEdit();
 
     // Lightbox close
     document.getElementById('lightbox').onclick = function () {
@@ -374,8 +420,12 @@ const UIManager = {
         document.getElementById('customCodeModal').classList.remove('open');
         document.getElementById('profileModal').classList.remove('open');
         document.getElementById('roomSettingsModal').classList.remove('open');
+        document.getElementById('passwordModal').classList.remove('open');
+        document.getElementById('knockModal').classList.remove('open');
         this.closeReactionPicker();
       }
     });
+
+    document.addEventListener('click', () => this.closeReactionPicker());
   }
 };
