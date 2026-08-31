@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QozaChat – Szyfrowany Czat P2P</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- LOBBY SCREEN -->
+<div class="screen active" id="lobby">
+  <div class="lobby-bg"></div>
+  <div class="lobby-inner">
+    <div class="lobby-brand">
+      <div class="qoza-wordmark">Qoza<span>Chat</span></div>
+      <div class="qoza-sub">Bezpośredni czat P2P — pełna prywatność, bez serwera i bez historii w chmurze.</div>
+      <div class="feature-list">
+        <div class="feat"><div class="feat-dot"></div>Pokoje wieloosobowe P2P (do 12 osób)</div>
+        <div class="feat"><div class="feat-dot"></div>Szyfrowane połączenie bezpośrednie (WebRTC)</div>
+        <div class="feat"><div class="feat-dot"></div>Wiadomości głosowe, pliki, edycja i reakcje</div>
+        <div class="feat"><div class="feat-dot"></div>System moderatorów, haseł i akceptacji</div>
+        <div class="feat"><div class="feat-dot"></div>Grupowe połączenia głosowe i wideo</div>
+      </div>
+    </div>
+
+    <div class="lobby-form">
+      <div class="profile-card-setup" id="profileCardSetup">
+        <div class="profile-avatar-lg" id="profileAvatarDisplay">👤</div>
+        <div>
+          <div style="font-size:13px;font-weight:700">Twój profil</div>
+          <div style="font-size:11px;color:var(--text2)">Kliknij, aby zmienić avatar i nazwę</div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <label class="form-label">Twój pseudonim</label>
+        <input class="field" id="nameInput" type="text" placeholder="Jak chcesz się nazywać?" maxlength="20" autocomplete="off">
+      </div>
+
+      <div class="form-section">
+        <label class="form-label">Stwórz pokój</label>
+        <div class="row-gap">
+          <button class="btn btn-acc" id="createBtn">Nowy pokój</button>
+          <button class="btn btn-ghost" id="createNamedBtn">Własny kod</button>
+        </div>
+      </div>
+
+      <div class="form-divider">lub dołącz do pokoju</div>
+
+      <div class="form-section">
+        <label class="form-label">Kod pokoju (12 znaków)</label>
+        <input class="field field-code" id="roomInput" type="text" placeholder="XXXX-XXXX-XXXX" maxlength="14" autocomplete="off">
+      </div>
+      <button class="btn btn-ghost" id="joinBtn" style="width:100%">Dołącz</button>
+
+      <div id="savedRoomsSection" style="display:none">
+        <div class="form-divider">zapisane pokoje</div>
+        <div class="saved-rooms" id="savedRoomsList"></div>
+      </div>
+
+      <div class="status-box" id="statusBox"></div>
+    </div>
+  </div>
+</div>
+
+<!-- CHAT SCREEN -->
+<div class="screen" id="chat">
+  <div class="mobile-overlay" id="mobileOverlay"></div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sb-head">
+      <div class="sb-wordmark">Qoza<span>Chat</span></div>
+      <div class="room-pill">
+        <div class="room-pill-code" id="sbRoomCode">-----</div>
+        <div class="room-pill-actions">
+          <button class="icon-btn" id="copyCodeBtn" title="Kopiuj kod pokoju">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="icon-btn" id="exportBtn" title="Eksportuj historię">
+            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sb-body">
+      <div class="sb-section-header">
+        <div class="sb-section-label">Uczestnicy</div>
+        <div style="font-size:11px;color:var(--text3);font-weight:600" id="userCountBadge">1 / 12</div>
+      </div>
+      <div id="userList"></div>
+    </div>
+
+    <div class="sb-foot">
+      <button class="leave-btn" id="leaveBtn">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Opuść pokój
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main Chat Area -->
+  <div class="chat-main">
+    <div class="chat-topbar">
+      <div class="chat-topbar-left">
+        <button class="sidebar-toggle" id="sidebarToggleBtn" title="Menu">
+          <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <div class="chat-room-label" id="chatRoomLabel"># -----</div>
+        <div class="status-badge badge-wait" id="statusBadge">
+          <div class="dot connecting"></div> Oczekuje
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="icon-btn" id="callBtn" title="Połączenie głosowe/wideo">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </button>
+
+        <button class="icon-btn" id="roomSettingsBtn" title="Ustawienia pokoju">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+
+        <select id="themeSelect" class="icon-btn" style="width:auto;padding:0 6px;font-size:11px" title="Motyw">
+          <option value="default">Ciemny</option>
+          <option value="midnight">Midnight</option>
+          <option value="cyberpunk">Cyberpunk</option>
+        </select>
+
+        <button class="icon-btn" id="mobileCopyBtn" title="Kopiuj kod">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+
+        <button class="icon-btn" id="mobileLeaveBtn" title="Opuść" style="color:var(--red)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Video Grid Overlay -->
+    <div class="video-grid" id="videoGrid"></div>
+
+    <!-- Waiting Pane -->
+    <div class="waiting-pane" id="waitingPane">
+      <div class="waiting-graphic">
+        <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+      </div>
+      <div class="waiting-title">Czekam na uczestników</div>
+      <div class="waiting-code-hint" id="waitingCode">-----</div>
+      <div class="waiting-hint">Prześlij ten 12-znakowy kod osobom, z którymi chcesz rozmawiać. Pokój mieści do 12 osób.</div>
+    </div>
+
+    <!-- Typing Indicator Bar -->
+    <div class="typing-bar" id="typingBar">
+      <div class="typing-dots"><div class="td"></div><div class="td"></div><div class="td"></div></div>
+      <span id="typingLabel">Ktoś pisze...</span>
+    </div>
+
+    <!-- Messages Container -->
+    <div class="msgs" id="msgs" style="display:none"></div>
+
+    <!-- Mentions Dropdown -->
+    <div class="mentions-dropdown" id="mentionsDropdown"></div>
+
+    <!-- Input Zone -->
+    <div class="input-zone">
+      <div class="reply-banner hidden" id="replyBanner">
+        <span class="reply-text" id="replyText"></span>
+        <button class="reply-close" id="replyClose">✕</button>
+      </div>
+
+      <div class="input-bar">
+        <textarea class="chat-textarea" id="chatInput" placeholder="Napisz wiadomość… (użyj @ do wzmianki)" rows="1" disabled></textarea>
+
+        <div class="input-actions">
+          <button class="ia-btn" id="recordBtn" title="Nagraj głosówkę" disabled>🎤</button>
+          <button class="ia-btn" id="emojiBtn" title="Emoji" disabled>😊</button>
+          <label class="ia-btn" id="fileLabel" title="Wyślij plik" style="cursor:pointer;opacity:0.3;pointer-events:none">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66L9.41 17.41a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            <input type="file" id="fileInput" style="display:none" multiple>
+          </label>
+
+          <button class="send-btn" id="sendBtn" disabled>
+            <svg width="15" height="15" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="input-hint">
+        <span>Enter — wyślij &nbsp;•&nbsp; Shift+Enter — nowa linia &nbsp;•&nbsp; @ — wzmianka &nbsp;•&nbsp; Przeciągnij plik</span>
+        <button class="mobile-newline-btn" id="mobileNewlineBtn">↵ Nowa linia</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Custom Room Code Modal -->
+<div class="modal-backdrop" id="customCodeModal">
+  <div class="modal">
+    <button class="modal-close" id="customCodeClose">×</button>
+    <div class="modal-title">Własny kod pokoju</div>
+    <label class="form-label">Kod (12 znaków)</label>
+    <input class="field field-code" id="customCodeInput" type="text" placeholder="XXXX-XXXX-XXXX" maxlength="14" style="margin-bottom:16px">
+    <div class="row-gap">
+      <button class="btn btn-ghost" id="customCodeCancel">Anuluj</button>
+      <button class="btn btn-acc" id="customCodeConfirm">Stwórz</button>
+    </div>
+    <div class="status-box" id="customCodeStatus"></div>
+  </div>
+</div>
+
+<!-- User Profile Setup Modal -->
+<div class="modal-backdrop" id="profileModal">
+  <div class="modal">
+    <button class="modal-close" id="profileModalClose">×</button>
+    <div class="modal-title">Profil Użytkownika</div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+      <div class="profile-avatar-lg" id="profileModalAvatarPrev">👤</div>
+      <label class="btn btn-ghost" style="cursor:pointer">
+        Zmień zdjęcie
+        <input type="file" id="profileAvatarUpload" accept="image/*" style="display:none">
+      </label>
+    </div>
+    <div class="form-section">
+      <label class="form-label">Nazwa wyświetlana</label>
+      <input class="field" id="profileNameInput" type="text" maxlength="20">
+    </div>
+    <button class="btn btn-acc" id="saveProfileBtn" style="width:100%">Zapisz profil</button>
+  </div>
+</div>
+
+<!-- Room Settings & Permissions Modal -->
+<div class="modal-backdrop" id="roomSettingsModal">
+  <div class="modal">
+    <button class="modal-close" id="roomSettingsClose">×</button>
+    <div class="modal-title">Ustawienia & Uprawnienia Pokoju</div>
+    
+    <div class="form-section">
+      <label class="form-label">Hasło pokoju (opcjonalne)</label>
+      <input class="field" id="settingPassword" type="password" placeholder="Brak hasła">
+    </div>
+
+    <div class="form-section" style="display:flex;align-items:center;justify-content:space-between">
+      <label class="form-label" style="margin:0">Ręczna akceptacja dołączenia (Knock)</label>
+      <input type="checkbox" id="settingRequireApproval">
+    </div>
+
+    <div class="form-section">
+      <label class="form-label">Cooldown pisania (sekundy)</label>
+      <input class="field" id="settingSlowMode" type="number" min="0" max="60" value="0">
+    </div>
+
+    <div class="form-section" style="display:flex;align-items:center;justify-content:space-between">
+      <label class="form-label" style="margin:0">Zezwól na pisanie tekstowe</label>
+      <input type="checkbox" id="settingAllowText" checked>
+    </div>
+
+    <div class="form-section" style="display:flex;align-items:center;justify-content:space-between">
+      <label class="form-label" style="margin:0">Zezwól na wysyłanie plików i głosówek</label>
+      <input type="checkbox" id="settingAllowMedia" checked>
+    </div>
+
+    <div class="form-section">
+      <label class="form-label">Zmień kod pokoju (12 znaków)</label>
+      <input class="field field-code" id="settingNewCode" type="text" maxlength="14">
+    </div>
+
+    <button class="btn btn-acc" id="saveRoomSettingsBtn" style="width:100%">Zapisz ustawienia</button>
+  </div>
+</div>
+
+<!-- Lightbox Modal -->
+<div class="lightbox" id="lightbox">
+  <img id="lightboxImg" src="" alt="Podgląd">
+</div>
+
+<!-- Emoji Picker Popup -->
+<div class="emoji-picker" id="emojiPicker" style="display:none"></div>
+
+<!-- Toast Alert -->
+<div class="toast" id="toast"></div>
+
+<!-- Scripts -->
+<script src="js/config.js"></script>
+<script src="js/db.js"></script>
+<script src="js/permissions.js"></script>
+<script src="js/webrtc.js"></script>
+<script src="js/messages.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/calls.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
