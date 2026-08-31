@@ -14,6 +14,7 @@ const WebRTCEngine = {
   isConnecting: false,
   cooldownTimer: 0,
   lastSentTime: 0,
+  seenMsgIds: new Set(),
 
   callbacks: {
     onStatusChange: null,
@@ -27,12 +28,12 @@ const WebRTCEngine = {
     onKnockRequest: null,
     onKicked: null,
     onRoomCodeChanged: null,
-    onPollUpdated: null,
-    onCallSignal: null
+    onRoomDeleted: null
   },
 
   initTabLock() {
     if ('BroadcastChannel' in window) {
+      if (this.tabChannel) { try { this.tabChannel.close(); } catch (e) {} }
       this.tabChannel = new BroadcastChannel('qozachat_active_rooms');
       this.tabChannel.onmessage = e => {
         if (e.data && e.data.type === 'ping-room' && e.data.room === this.rawRoomCode) {
@@ -81,6 +82,7 @@ const WebRTCEngine = {
     this.isHost = true;
     this.myRole = RoomPermissions.ROLES.OWNER;
     this.roomSettings = RoomPermissions.createDefaultSettings();
+    this.seenMsgIds.clear();
 
     const hostPeerId = this.getHostPeerId(raw);
     return new Promise((resolve, reject) => {
@@ -102,7 +104,7 @@ const WebRTCEngine = {
       this.peer.on('error', err => {
         this.isConnecting = false;
         if (err.type === 'unavailable-id') {
-          reject(new Error('Ten kod pokoju jest już zajęty przez innego gospodarza.'));
+          reject(new Error('Ten kod pokoju jest w tej chwili zajęty.'));
         } else {
           reject(new Error('Błąd połączenia PeerJS: ' + err.type));
         }
@@ -126,6 +128,7 @@ const WebRTCEngine = {
     this.myAvatar = avatar || name[0].toUpperCase();
     this.isHost = false;
     this.myRole = RoomPermissions.ROLES.MEMBER;
+    this.seenMsgIds.clear();
 
     const hostPeerId = this.getHostPeerId(raw);
     return new Promise((resolve, reject) => {
@@ -194,6 +197,16 @@ const WebRTCEngine = {
   handleIncomingHostConn(conn) {
     conn.on('data', data => {
       if (data.type === 'join-request') {
+        // Clean up any stale member with the same username (duplicate user fix)
+        const existingPeerId = Object.keys(this.members).find(pid => this.members[pid].name === data.name);
+        if (existingPeerId) {
+          delete this.members[existingPeerId];
+          if (this.connections[existingPeerId]) {
+            try { this.connections[existingPeerId].close(); } catch (e) {}
+            delete this.connections[existingPeerId];
+          }
+        }
+
         const activeCount = Object.keys(this.connections).length + 1;
         if (activeCount >= MAX_ROOM_MEMBERS) {
           conn.send({ type: 'join-rejected', reason: 'Pokój osiągnął maksymalny limit 12 osób.' });
@@ -208,7 +221,7 @@ const WebRTCEngine = {
         }
 
         if (this.roomSettings.password && this.roomSettings.password !== data.password) {
-          conn.send({ type: 'join-rejected', reason: 'Niepoprawne hasło pokoju.' });
+          conn.send({ type: 'join-rejected', reason: 'password-required' });
           conn.close();
           return;
         }
@@ -277,11 +290,17 @@ const WebRTCEngine = {
     delete this.connections[peerId];
     delete this.members[peerId];
 
-    if (this.isHost && member) {
+    if (member) {
+      // If the owner left, automatically assign ownership to another active member!
       if (member.role === RoomPermissions.ROLES.OWNER && Object.keys(this.members).length > 0) {
-        const nextId = Object.keys(this.members)[0];
-        this.members[nextId].role = RoomPermissions.ROLES.OWNER;
+        const remainingPeerIds = Object.keys(this.members);
+        const nextOwnerId = remainingPeerIds[0];
+        this.members[nextOwnerId].role = RoomPermissions.ROLES.OWNER;
+        if (nextOwnerId === this.myPeerId) {
+          this.myRole = RoomPermissions.ROLES.OWNER;
+        }
       }
+
       this.broadcast({ type: 'members-updated', members: this.members });
       if (this.callbacks.onMembersUpdated) this.callbacks.onMembersUpdated(this.members);
     }
@@ -298,6 +317,13 @@ const WebRTCEngine = {
   handleData(data, fromPeerId) {
     if (!data || !data.type) return;
 
+    // Deduplicate chat messages by ID
+    if (data.type === 'chat-message' && data.id) {
+      if (this.seenMsgIds.has(data.id)) return;
+      this.seenMsgIds.add(data.id);
+    }
+
+    // Host relays to other peers (except sender)
     if (this.isHost && data.type !== 'members-updated') {
       this.broadcast(data, fromPeerId);
     }
@@ -338,11 +364,9 @@ const WebRTCEngine = {
         this.roomCode = formatCode(data.newRawCode);
         if (this.callbacks.onRoomCodeChanged) this.callbacks.onRoomCodeChanged(this.roomCode);
         break;
-      case 'poll-vote':
-        if (this.callbacks.onPollUpdated) this.callbacks.onPollUpdated(data.pollId, data.optionIndex, data.author);
-        break;
-      case 'call-signal':
-        if (this.callbacks.onCallSignal) this.callbacks.onCallSignal(data, fromPeerId);
+      case 'room-deleted':
+        if (this.callbacks.onRoomDeleted) this.callbacks.onRoomDeleted();
+        this.disconnect();
         break;
     }
   },
@@ -367,9 +391,12 @@ const WebRTCEngine = {
       throw new Error('Jesteś wyciszony w tym pokoju.');
     }
 
+    const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    this.seenMsgIds.add(msgId);
+
     const msgObj = {
       type: 'chat-message',
-      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      id: msgId,
       author: this.myName,
       avatar: this.myAvatar,
       text,
@@ -452,18 +479,38 @@ const WebRTCEngine = {
     if (this.callbacks.onMembersUpdated) this.callbacks.onMembersUpdated(this.members);
   },
 
+  transferOwnership(targetName) {
+    if (!RoomPermissions.isOwner(this.myRole)) throw new Error('Tylko właściciel może przekazać własność pokoju.');
+    const targetMember = Object.values(this.members).find(m => m.name === targetName);
+    if (!targetMember) throw new Error('Nie znaleziono użytkownika.');
+
+    this.myRole = RoomPermissions.ROLES.ADMIN;
+    this.members[this.myPeerId].role = RoomPermissions.ROLES.ADMIN;
+    targetMember.role = RoomPermissions.ROLES.OWNER;
+
+    this.broadcast({ type: 'members-updated', members: this.members });
+    if (this.callbacks.onMembersUpdated) this.callbacks.onMembersUpdated(this.members);
+  },
+
   setRole(targetName, newRole) {
     if (!RoomPermissions.isOwner(this.myRole)) throw new Error('Tylko właściciel może zmieniać role.');
     const targetMember = Object.values(this.members).find(m => m.name === targetName);
     if (!targetMember) return;
 
     if (newRole === RoomPermissions.ROLES.OWNER) {
-      this.myRole = RoomPermissions.ROLES.ADMIN;
-      this.members[this.myPeerId].role = RoomPermissions.ROLES.ADMIN;
+      this.transferOwnership(targetName);
+      return;
     }
+
     targetMember.role = newRole;
     this.broadcast({ type: 'members-updated', members: this.members });
     if (this.callbacks.onMembersUpdated) this.callbacks.onMembersUpdated(this.members);
+  },
+
+  deleteRoom() {
+    if (!RoomPermissions.isOwner(this.myRole)) throw new Error('Tylko właściciel może usunąć pokój.');
+    this.broadcast({ type: 'room-deleted' });
+    this.disconnect();
   },
 
   updateSettings(newSettings) {
@@ -490,6 +537,7 @@ const WebRTCEngine = {
     if (this.peer) { try { this.peer.destroy(); } catch (e) {} this.peer = null; }
     this.members = {};
     this.isConnecting = false;
+    this.seenMsgIds.clear();
     if (this.tabChannel) { try { this.tabChannel.close(); } catch (e) {} this.tabChannel = null; }
   }
 };
