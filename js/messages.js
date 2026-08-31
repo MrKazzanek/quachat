@@ -32,7 +32,12 @@ const MessageManager = {
   },
 
   renderMessage(containerEl, msgData, isHistory = false) {
-    const { id, author, avatar, text, time, side, replyTo, edited, isFile, isVoice, isPoll, fileMeta, audioData, reactions, pollData } = msgData;
+    const { id, author, avatar, text, time, side, replyTo, edited, isFile, isVoice, fileMeta, audioData, reactions } = msgData;
+
+    // Deduplication check: prevent rendering identical message ID twice
+    if (document.getElementById('msg_' + id)) {
+      return;
+    }
 
     const group = document.createElement('div');
     group.className = 'msg-group ' + side;
@@ -197,7 +202,7 @@ const MessageManager = {
     const counts = {};
     const myReactions = new Set();
 
-    Object.entries(reactions).forEach(([k, author]) => {
+    Object.entries(reactions || {}).forEach(([k, author]) => {
       let em = k.split('_')[0];
       counts[em] = (counts[em] || 0) + 1;
       if (author === WebRTCEngine.myName) myReactions.add(em);
